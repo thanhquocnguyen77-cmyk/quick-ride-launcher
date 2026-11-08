@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Ride & Food Launcher</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+  body { margin:0; background:#f8fafc; font-family:system-ui,-apple-system,sans-serif; }
+  #map { height:200px; width:100%; border-radius:1rem; z-index:1; }
+  .ac { position:absolute; z-index:9999; top:100%; left:0; right:0; background:#fff; border:1px solid #e2e8f0;
+        border-radius:0 0 .75rem .75rem; max-height:180px; overflow-y:auto; box-shadow:0 10px 15px -3px rgba(0,0,0,.1); }
+  .ac div { padding:10px; cursor:pointer; border-bottom:1px solid #f1f5f9; font-size:13px; color:#334155; }
+  .ac div:active { background:#f1f5f9; }
+  .pin { width:16px; height:16px; border-radius:50%; border:3px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.5); }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); max-width:90%; z-index:99999; }
+</style>
+</head>
+<body>
+<div class="w-full max-w-md mx-auto bg-white min-h-screen sm:rounded-3xl sm:shadow-2xl flex flex-col">
+  <div class="bg-emerald-600 p-4 text-white sticky top-0 z-20 shadow-md">
+    <h1 class="text-base font-bold flex items-center gap-2"><i class="fa-solid fa-bolt"></i> Quick Ride & Food Launcher</h1>
+    <p class="text-[11px] opacity-90 mt-0.5">Chọn điểm đến một lần, mở app hãng để đặt</p>
+  </div>
+
+  <div class="p-4 space-y-3.5 flex-1 pb-16">
+    <div class="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-center text-xs font-semibold">
+      <button id="btn-bike" onclick="setMode('bike')" class="py-2 rounded-lg"><i class="fa-solid fa-motorcycle block mb-0.5 text-sm"></i>Xe máy</button>
+      <button id="btn-car"  onclick="setMode('car')"  class="py-2 rounded-lg"><i class="fa-solid fa-car block mb-0.5 text-sm"></i>Xe hơi</button>
+      <button id="btn-food" onclick="setMode('food')" class="py-2 rounded-lg"><i class="fa-solid fa-utensils block mb-0.5 text-sm"></i>Đồ ăn</button>
+    </div>
+
+    <div id="map-wrap" class="relative">
+      <div id="map"></div>
+      <div class="absolute bottom-2 right-2 z-[1000] bg-white/90 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 shadow">Chạm bản đồ để chọn điểm đến</div>
+    </div>
+
+    <div class="space-y-2.5">
+      <div>
+        <label class="text-xs font-bold text-slate-400">Điểm đi</label>
+        <div class="flex items-center gap-2 bg-slate-50 border p-2 rounded-xl text-xs">
+          <i class="fa-solid fa-circle-dot text-emerald-500"></i>
+          <input id="input-a" readonly value="Đang định vị..." class="bg-transparent w-full focus:outline-none text-slate-600 font-medium truncate">
+        </div>
+      </div>
+      <div class="relative">
+        <label id="label-b" class="text-xs font-bold text-slate-400">Điểm đến</label>
+        <div class="flex items-center gap-2 bg-white border border-emerald-500 p-2 rounded-xl text-xs shadow-sm">
+          <i id="icon-b" class="fa-solid fa-location-dot text-rose-500"></i>
+          <input id="input-b" placeholder="Nhập địa điểm đến..." oninput="onInput(this.value)" class="bg-transparent w-full focus:outline-none font-medium text-slate-800">
+          <button onclick="clearDest()" class="text-slate-400 px-1"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="ac" class="ac hidden"></div>
+      </div>
+    </div>
+
+    <div id="estimate" class="hidden bg-slate-50 border rounded-xl p-3 text-xs text-slate-600"></div>
+
+    <div>
+      <label class="text-xs font-bold text-slate-400 mb-1.5 block">Mở ứng dụng để đặt</label>
+      <div id="app-list" class="space-y-2"></div>
+      <p class="text-[11px] text-slate-400 mt-2 leading-snug">
+        Địa chỉ được tự sao chép khi bạn bấm. Nếu app không tự điền, hãy dán vào ô tìm kiếm.
+        Voucher và giá chính xác bạn chọn ngay trong app hãng.
+      </p>
+    </div>
+  </div>
+</div>
+<div id="toast" class="hidden bg-slate-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg"></div>
+
+<script>
+/* =====================  CẤU HÌNH  ===================== */
+
+// Giá tham khảo (tự chỉnh theo thực tế). Chỉ là ước tính, KHÔNG phải giá của hãng.
+const FARE = {
+  bike: { baseKm: 2, baseFee: 15000, perKm: 5500 },
+  car:  { baseKm: 2, baseFee: 30000, perKm: 12000 }
+};
+
+// Deep link của từng app. Mỗi hàm nhận d = {lat, lng, name, text, fromLat, fromLng}.
+// LƯU Ý: chỉ Grab có tham số lộ trình được mình biết từ tài liệu đối tác, nhưng chưa kiểm chứng
+// trên máy bạn. Be / Xanh SM / ShopeeFood: hiện chỉ MỞ APP (không điền địa chỉ) cho tới khi bạn tìm
+// được scheme có tham số đúng. Cách tìm: xem README cuối file.
+const e = encodeURIComponent;
+const APPS = {
+  grab: {
+    label: 'Grab', color: 'emerald', icon: 'fa-car-side',
+    bike: d => `grab://open?screenType=BOOKING&dropOffLatitude=${d.lat}&dropOffLongitude=${d.lng}&dropOffName=${e(d.name)}&pickUpLatitude=${d.fromLat}&pickUpLongitude=${d.fromLng}`,
+    car:  d => `grab://open?screenType=BOOKING&dropOffLatitude=${d.lat}&dropOffLongitude=${d.lng}&dropOffName=${e(d.name)}&pickUpLatitude=${d.fromLat}&pickUpLongitude=${d.fromLng}`,
+    food: d => `grab://open`
+  },
+  be: {
+    label: 'Be', color: 'amber', icon: 'fa-car',
+    bike: d => `be://`, car: d => `be://`
+  },
+  xanhsm: {
+    label: 'Xanh SM', color: 'cyan', icon: 'fa-leaf',
+    bike: d => `xanhsm://`, car: d => `xanhsm://`
+  },
+  shopeefood: {
+    label: 'ShopeeFood', color: 'orange', icon: 'fa-utensils',
+    food: d => `shopeefood://`
+  }
+};
+const MODE_APPS = { bike:['grab','be','xanhsm'], car:['grab','be','xanhsm'], food:['grab','shopeefood'] };
+
+/* =====================  TRẠNG THÁI  ===================== */
+let mode = 'bike', map, markerA, markerB, routeLine, timer, routeTimer;
+let from = { lat: 10.7769, lng: 106.7009 };   // mặc định: trung tâm TP.HCM
+let dest = null;                               // {lat, lng, name}
+
+const $ = id => document.getElementById(id);
+const pin = c => L.divIcon({ className:'', html:`<div class="pin" style="background:${c}"></div>`, iconSize:[16,16], iconAnchor:[8,8] });
+const short = s => (s || '').split(',').slice(0,3).join(',').trim();
+
+function toast(msg, ms = 4000) {
+  const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), ms);
+}
+
+/* =====================  BẢN ĐỒ  ===================== */
+function initMap() {
+  map = L.map('map').setView([from.lat, from.lng], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+  markerA = L.marker([from.lat, from.lng], { icon: pin('#10b981') }).addTo(map);
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(p => {
+      from = { lat: p.coords.latitude, lng: p.coords.longitude };
+      markerA.setLatLng([from.lat, from.lng]);
+      map.setView([from.lat, from.lng], 14);
+      $('input-a').value = `Vị trí hiện tại (${from.lat.toFixed(4)}, ${from.lng.toFixed(4)})`;
+      updateRoute();
+    }, () => {
+      $('input-a').value = 'Không lấy được GPS (dùng trung tâm TP.HCM)';
+    }, { enableHighAccuracy:true, timeout:8000 });
+  } else {
+    $('input-a').value = 'Thiết bị không hỗ trợ GPS';
+  }
+
+  map.on('click', async ev => {
+    if (mode === 'food') return;
+    setDest(ev.latlng.lat, ev.latlng.lng, `${ev.latlng.lat.toFixed(5)}, ${ev.latlng.lng.toFixed(5)}`);
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&accept-language=vi&lat=${ev.latlng.lat}&lon=${ev.latlng.lng}`);
+      const j = await r.json();
+      if (j.display_name) setDest(ev.latlng.lat, ev.latlng.lng, short(j.display_name), j.display_name);
+    } catch (_) {}
+  });
+}
+
+function setDest(lat, lng, name, full) {
+  dest = { lat, lng, name, full: full || name };
+  $('input-b').value = name;
+  if (markerB) map.removeLayer(markerB);
+  markerB = L.marker([lat, lng], { icon: pin('#f43f5e') }).addTo(map);
+  updateRoute();
+}
+
+function clearDest() {
+  dest = null; $('input-b').value = ''; $('ac').classList.add('hidden');
+  if (markerB) { map.removeLayer(markerB); markerB = null; }
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  $('estimate').classList.add('hidden');
+}
+
+/* =====================  GỢI Ý ĐỊA CHỈ  ===================== */
+function onInput(v) {
+  dest = mode === 'food' ? null : dest && dest.name === v ? dest : null; // gõ tay -> bỏ toạ độ cũ
+  clearTimeout(timer);
+  const list = $('ac');
+  if (mode === 'food' || !v || v.length < 3) { list.classList.add('hidden'); return; }
+  timer = setTimeout(async () => {
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&accept-language=vi&countrycodes=vn&limit=5&q=${e(v)}`);
+      const data = await r.json();
+      list.innerHTML = '';
+      if (!data.length) { list.classList.add('hidden'); return; }
+      list.classList.remove('hidden');
+      data.forEach(it => {
+        const div = document.createElement('div');
+        div.textContent = it.display_name;
+        div.onclick = () => {
+          list.classList.add('hidden');
+          setDest(parseFloat(it.lat), parseFloat(it.lon), short(it.display_name), it.display_name);
+          map.setView([it.lat, it.lon], 14);
+        };
+        list.appendChild(div);
+      });
+    } catch (_) {}
+  }, 500);
+}
+
+/* =====================  TUYẾN ĐƯỜNG + GIÁ THAM KHẢO  ===================== */
+function money(n) { return Math.round(n / 1000) * 1000; }
+function fmt(n) { return n.toLocaleString('vi-VN') + 'đ'; }
+
+function updateRoute() {
+  clearTimeout(routeTimer);
+  if (!dest || mode === 'food') { $('estimate').classList.add('hidden'); return; }
+  routeTimer = setTimeout(async () => {
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`;
+      const j = await (await fetch(url)).json();
+      const rt = j.routes && j.routes[0];
+      if (!rt) return;
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = L.geoJSON(rt.geometry, { style:{ color:'#059669', weight:4 } }).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding:[24,24] });
+
+      const km = rt.distance / 1000, min = Math.round(rt.duration / 60);
+      const f = FARE[mode];
+      const base = f.baseFee + Math.max(0, km - f.baseKm) * f.perKm;
+      $('estimate').classList.remove('hidden');
+      $('estimate').innerHTML =
+        `<b>${km.toFixed(1)} km</b> · khoảng ${min} phút<br>` +
+        `Giá tham khảo: <b>${fmt(money(base * 0.85))} – ${fmt(money(base * 1.25))}</b>` +
+        `<div class="text-[10px] text-slate-400 mt-1">Ước tính theo công thức tự cấu hình, không phải giá thật của hãng.</div>`;
+    } catch (_) { $('estimate').classList.add('hidden'); }
+  }, 400);
+}
+
+/* =====================  CHẾ ĐỘ + DANH SÁCH APP  ===================== */
+function setMode(m) {
+  mode = m;
+  ['bike','car','food'].forEach(k => {
+    $('btn-' + k).className = k === m ? 'py-2 rounded-lg bg-white shadow-sm text-emerald-600 font-bold' : 'py-2 rounded-lg text-slate-500';
+  });
+  const food = m === 'food';
+  $('label-b').textContent = food ? 'Món ăn / quán ăn' : 'Điểm đến';
+  $('input-b').placeholder = food ? 'Nhập tên món hoặc quán...' : 'Nhập địa điểm đến...';
+  $('icon-b').className = 'fa-solid text-rose-500 ' + (food ? 'fa-magnifying-glass' : 'fa-location-dot');
+  $('map-wrap').classList.toggle('hidden', food);
+  if (food) { clearDest(); } else { setTimeout(() => map.invalidateSize(), 50); updateRoute(); }
+  renderApps();
+}
+
+function renderApps() {
+  $('app-list').innerHTML = MODE_APPS[mode].map(k => {
+    const a = APPS[k], c = a.color, verb = mode === 'food' ? 'Mở' : 'Mở';
+    return `<button onclick="launch('${k}')" class="w-full p-3 bg-${c}-50 border border-${c}-200 rounded-xl flex items-center justify-between text-xs font-bold text-${c}-800 shadow-sm">
+      <span><i class="fa-solid ${a.icon} mr-2 text-${c}-600"></i>${verb} ${a.label}</span>
+      <span class="bg-${c}-600 text-white px-3 py-1 rounded-full text-[10px]">Sao chép & mở</span></button>`;
+  }).join('');
+}
+
+/* =====================  MỞ APP  ===================== */
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+  } catch (_) { return false; }
+}
+
+async function ensureDest() {
+  // Người dùng gõ tay mà chưa chọn gợi ý -> tự tìm toạ độ từ kết quả đầu tiên
+  const text = $('input-b').value.trim();
+  if (!text || mode === 'food' || dest) return;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&accept-language=vi&countrycodes=vn&limit=1&q=${e(text)}`);
+    const j = await r.json();
+    if (j[0]) setDest(parseFloat(j[0].lat), parseFloat(j[0].lon), short(j[0].display_name), j[0].display_name);
+  } catch (_) {}
+}
+
+async function launch(key) {
+  const text = $('input-b').value.trim();
+  if (!text) { toast(mode === 'food' ? 'Hãy nhập món hoặc quán trước.' : 'Hãy chọn điểm đến trước.'); return; }
+  await ensureDest();
+
+  const build = APPS[key][mode];
+  const d = { lat: dest?.lat, lng: dest?.lng, name: dest?.name || text, text, fromLat: from.lat, fromLng: from.lng };
+  const url = build(d);
+
+  // Luôn sao chép địa chỉ đầy đủ (giữ nguyên dấu tiếng Việt) để dán nếu app không tự điền
+  const copied = await copyText(dest?.full || text);
+  toast(copied
+    ? 'Đã sao chép. Nếu app mở ra mà ô tìm kiếm trống, hãy dán vào.'
+    : 'Không sao chép được tự động. Hãy chép địa chỉ thủ công.', 5000);
+
+  // Mở app; nếu trang vẫn hiển thị sau ~2 giây thì có thể app chưa cài hoặc scheme sai
+  let left = false;
+  const onHide = () => { if (document.hidden) left = true; };
+  document.addEventListener('visibilitychange', onHide, { once:true });
+  setTimeout(() => {
+    if (!left) toast(`Không mở được ${APPS[key].label}. Kiểm tra app đã cài chưa.`, 6000);
+  }, 2000);
+  setTimeout(() => { window.location.href = url; }, 250);
+}
+
+window.onload = () => { initMap(); setMode('bike'); };
+</script>
+
+<!--
+README: CÁCH TÌM DEEP LINK ĐÚNG CHO BE / XANH SM / SHOPEEFOOD
+1) Android: tải file APK trên APKMirror, mở AndroidManifest.xml (apktool hoặc jadx), tìm các thẻ
+   <intent-filter> có <data android:scheme="..." android:host="..."/> để biết scheme/host app nhận.
+2) Test nhanh bằng adb: adb shell am start -a android.intent.action.VIEW -d "scheme://host?param=..."
+3) Khi biết định dạng, sửa hàm tương ứng trong APPS ở đầu file.
+-->
+</body>
+</html>
