@@ -6,11 +6,11 @@
 <title>Quick Ride Launcher</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <style>
   body { margin:0; background:#f8fafc; font-family:system-ui,-apple-system,sans-serif; }
-  #map { height:220px; width:100%; border-radius:1rem; z-index:1; }
+  #map { height:240px; width:100%; border-radius:1rem; z-index:1; }
   .ac { position:absolute; z-index:9999; top:100%; left:0; right:0; background:#fff; border:1px solid #e2e8f0;
         border-radius:0 0 .75rem .75rem; max-height:180px; overflow-y:auto; box-shadow:0 10px 15px -3px rgba(0,0,0,.1); }
   .ac div { padding:10px; cursor:pointer; border-bottom:1px solid #f1f5f9; font-size:13px; color:#334155; }
@@ -32,7 +32,7 @@
       <button id="btn-car"  onclick="setMode('car')"  class="py-2.5 rounded-lg"><i class="fa-solid fa-car block mb-0.5 text-sm"></i>Xe hơi</button>
     </div>
 
-    <div id="map-wrap" class="relative">
+    <div class="relative">
       <div id="map"></div>
       <div class="absolute bottom-2 right-2 z-[1000] bg-white/90 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 shadow">Chạm bản đồ để chọn điểm đến</div>
     </div>
@@ -46,9 +46,9 @@
         </div>
       </div>
       <div class="relative">
-        <label id="label-b" class="text-xs font-bold text-slate-400">Điểm đến</label>
+        <label class="text-xs font-bold text-slate-400">Điểm đến</label>
         <div class="flex items-center gap-2 bg-white border border-emerald-500 p-2 rounded-xl text-xs shadow-sm">
-          <i id="icon-b" class="fa-solid fa-location-dot text-rose-500"></i>
+          <i class="fa-solid fa-location-dot text-rose-500"></i>
           <input id="input-b" placeholder="Nhập địa điểm đến..." oninput="onInput(this.value)" class="bg-transparent w-full focus:outline-none font-medium text-slate-800">
           <button onclick="clearDest()" class="text-slate-400 px-1"><i class="fa-solid fa-xmark"></i></button>
         </div>
@@ -71,6 +71,7 @@
 <div id="toast" class="hidden bg-slate-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg"></div>
 
 <script>
+/* ===== CẤU HÌNH ===== */
 const FARE = {
   bike: { baseKm: 2, baseFee: 15000, perKm: 5500 },
   car:  { baseKm: 2, baseFee: 30000, perKm: 12000 }
@@ -94,6 +95,7 @@ const APPS = {
 };
 const MODE_APPS = { bike:['grab','be','xanhsm'], car:['grab','be','xanhsm'] };
 
+/* ===== TRẠNG THÁI ===== */
 let mode = 'bike', map, markerA, markerB, routeLine, timer, routeTimer;
 let from = { lat: 10.7769, lng: 106.7009 };
 let dest = null;
@@ -107,9 +109,23 @@ function toast(msg, ms = 4000) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
+/* ===== BẢN ĐỒ ===== */
 function initMap() {
   map = L.map('map').setView([from.lat, from.lng], 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+
+  const base = {
+    'Đơn giản': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap, © CARTO', maxZoom: 19 }),
+    'Vệ tinh': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri', maxZoom: 19 }),
+    'Địa hình': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap, SRTM | © OpenTopoMap', maxZoom: 17 }),
+    'OSM gốc': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19 })
+  };
+  base['Đơn giản'].addTo(map);
+  L.control.layers(base, null, { position: 'topright', collapsed: true }).addTo(map);
+
   markerA = L.marker([from.lat, from.lng], { icon: pin('#10b981') }).addTo(map);
 
   if (navigator.geolocation) {
@@ -151,6 +167,7 @@ function clearDest() {
   $('estimate').classList.add('hidden');
 }
 
+/* ===== GỢI Ý ĐỊA CHỈ ===== */
 function onInput(v) {
   dest = dest && dest.name === v ? dest : null;
   clearTimeout(timer);
@@ -177,6 +194,7 @@ function onInput(v) {
   }, 500);
 }
 
+/* ===== TUYẾN ĐƯỜNG + GIÁ THAM KHẢO ===== */
 function money(n) { return Math.round(n / 1000) * 1000; }
 function fmt(n) { return n.toLocaleString('vi-VN') + 'đ'; }
 
@@ -190,7 +208,8 @@ function updateRoute() {
       const rt = j.routes && j.routes[0];
       if (!rt) return;
       if (routeLine) map.removeLayer(routeLine);
-      routeLine = L.geoJSON(rt.geometry, { style:{ color:'#059669', weight:4 } }).addTo(map);
+      // Màu cam nổi bật trên cả nền sáng lẫn nền vệ tinh
+      routeLine = L.geoJSON(rt.geometry, { style:{ color:'#f59e0b', weight:5, opacity:0.9 } }).addTo(map);
       map.fitBounds(routeLine.getBounds(), { padding:[24,24] });
 
       const km = rt.distance / 1000, min = Math.round(rt.duration / 60);
@@ -205,12 +224,14 @@ function updateRoute() {
   }, 400);
 }
 
+/* ===== CHẾ ĐỘ + DANH SÁCH APP ===== */
 function setMode(m) {
   mode = m;
   ['bike','car'].forEach(k => {
     $('btn-' + k).className = k === m ? 'py-2.5 rounded-lg bg-white shadow-sm text-emerald-600 font-bold' : 'py-2.5 rounded-lg text-slate-500';
   });
   renderApps();
+  updateRoute();
 }
 
 function renderApps() {
@@ -222,6 +243,7 @@ function renderApps() {
   }).join('');
 }
 
+/* ===== MỞ APP ===== */
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
   try {
